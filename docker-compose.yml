@@ -7,6 +7,15 @@ networks:
     driver: bridge
     internal: true
 
+x-security-hardening: &security-hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
 volumes:
   pg-data:
     name: pg-data
@@ -17,6 +26,10 @@ volumes:
   app-logs:
     name: app-logs
 
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -24,8 +37,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: ${POSTGRES_DB}
+    secrets:
+      - postgres_password
     volumes:
       - pg-data:/var/lib/postgresql/data
     networks:
@@ -122,13 +137,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+    <<: *security-hardening
     pids_limit: 100
     mem_limit: 256m
     cpus: 0.5
@@ -157,13 +166,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+    <<: *security-hardening
     pids_limit: 50
     mem_limit: 256m
     cpus: 0.5
@@ -191,13 +194,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s     
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+    <<: *security-hardening
     pids_limit: 50
     mem_limit: 128m
     cpus: 0.3
+  db-inspector:
+    image: postgres:16-alpine
+    container_name: db-inspector
+    profiles: ["debug"]
+    networks:
+      - internal-net
+    entrypoint: ["sleep", "infinity"]
