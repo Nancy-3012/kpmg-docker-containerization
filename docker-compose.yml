@@ -36,6 +36,23 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 0.5
 
   redis:
     image: redis:7-alpine
@@ -52,6 +69,21 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 50
+    mem_limit: 256m
+    cpus: 0.3
 
   api:
     build:
@@ -90,6 +122,16 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 256m
+    cpus: 0.5
 
   worker:
     build:
@@ -115,6 +157,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 50
+    mem_limit: 256m
+    cpus: 0.5
+    
 
   frontend:
     build:
@@ -138,3 +191,13 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s     
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 50
+    mem_limit: 128m
+    cpus: 0.3
