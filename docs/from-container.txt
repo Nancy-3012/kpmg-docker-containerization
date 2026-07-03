@@ -1,0 +1,1 @@
+This file was created FROM INSIDE the container
