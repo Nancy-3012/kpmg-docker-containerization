@@ -1,79 +1,46 @@
-networks:
-  frontend-net:
-    driver: bridge
-  backend-net:
-    driver: bridge
-  internal-net:
-    driver: bridge
-    internal: true
+# -----------------------------------------------------------------------
+# Basic Docker Compose file — learning version
+# Goal: understand services, networks, volumes, env vars, and startup order.
+# (Security hardening, secrets, and resource limits removed for simplicity —
+#  the production-hardened version has been simplified out of this submission for clarity.)
+# -----------------------------------------------------------------------
 
-x-security-hardening: &security-hardening
-  read_only: true
-  tmpfs:
-    - /tmp
-  cap_drop:
-    - ALL
-  security_opt:
-    - no-new-privileges:true
+networks:
+  frontend-net:      # only frontend + api live here
+    driver: bridge
+  backend-net:        # only api + worker + redis live here
+    driver: bridge
+  internal-net:        # only api + worker + postgres live here
+    driver: bridge
 
 volumes:
-  pg-data:
-    name: pg-data
-  redis-data:
-    name: redis-data
-  app-uploads:
-    name: app-uploads
-  app-logs:
-    name: app-logs
-
-secrets:
-  postgres_password:
-    file: ./secrets/postgres_password.txt
+  pg-data:      # keeps Postgres data even if the container is deleted
+  redis-data:   # keeps Redis data even if the container is deleted
 
 services:
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    secrets:
-      - postgres_password
     volumes:
       - pg-data:/var/lib/postgresql/data
     networks:
       - internal-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/run/postgresql
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETUID
-      - SETGID
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 100
-    mem_limit: 512m
-    cpus: 0.5
 
   redis:
     image: redis:7-alpine
     container_name: redis
     restart: unless-stopped
-    command: redis-server --save 60 1 --appendonly yes
     volumes:
       - redis-data:/data
     networks:
@@ -83,125 +50,55 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETUID
-      - SETGID
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 50
-    mem_limit: 256m
-    cpus: 0.3
 
   api:
-    build:
-      context: ./api
-      args:
-        APP_VERSION: ${APP_VERSION}
-    image: task-api:${APP_VERSION}
+    build: ./api
     container_name: api
     restart: unless-stopped
     ports:
-      - "${API_PORT}:4000"
+      - "4000:4000"          # exposed to host so the browser can reach it
     environment:
       DB_HOST: postgres
-      DB_PORT: ${POSTGRES_PORT}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
       REDIS_HOST: redis
-      REDIS_PORT: ${REDIS_PORT}
-      PORT: ${API_PORT}
-    volumes:
-      - app-uploads:/app/uploads
-      - app-logs:/app/logs
     networks:
       - frontend-net
       - backend-net
       - internal-net
-    depends_on:
+    depends_on:               # wait for real readiness, not just "started"
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    <<: *security-hardening
-    pids_limit: 100
-    mem_limit: 256m
-    cpus: 0.5
 
   worker:
-    build:
-      context: ./worker
-      args:
-        APP_VERSION: ${APP_VERSION}
-    image: task-worker:${APP_VERSION}
+    build: ./worker
     container_name: worker
     restart: on-failure
     environment:
       DB_HOST: postgres
-      DB_PORT: ${POSTGRES_PORT}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
       REDIS_HOST: redis
-      REDIS_PORT: ${REDIS_PORT}
     networks:
-      - backend-net
+      - backend-net           # NOT on frontend-net — cannot reach frontend
       - internal-net
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    <<: *security-hardening
-    pids_limit: 50
-    mem_limit: 256m
-    cpus: 0.5
-    
 
   frontend:
-    build:
-      context: ./frontend
-      args:
-        APP_VERSION: ${APP_VERSION}
-        VITE_API_URL: ${VITE_API_URL}
-    image: task-frontend:${APP_VERSION}
+    build: ./frontend
     container_name: frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT}:3000"
+      - "3000:3000"          # this is the only thing users actually visit
     networks:
-      - frontend-net
+      - frontend-net          # only network it's on — can't reach postgres/redis/worker
     depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s     
-    <<: *security-hardening
-    pids_limit: 50
-    mem_limit: 128m
-    cpus: 0.3
-  db-inspector:
-    image: postgres:16-alpine
-    container_name: db-inspector
-    profiles: ["debug"]
-    networks:
-      - internal-net
-    entrypoint: ["sleep", "infinity"]
+      - api
